@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --experimental-strip-types --test src/flight.test.ts",
+    "test": "node --experimental-strip-types --test src/flight.test.ts src/route.test.ts",
     "prepare:head": "PARTS=0.004 node scripts/prepare-clay-head.mjs docs/art/meshy/toy/meshy-toy-raw.glb public/models/omar-meshy-toy.glb",
     "export:character": "node --experimental-strip-types scripts/export-character.mjs"
   },

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mark } from './Logo';
 
 export type LoadStage = 'systems' | 'model' | 'renderer' | 'ready';
 type Props = { stage: LoadStage; progress: number | null; failed: boolean; slow: boolean; onDone: () => void; onRead: () => void };
@@ -77,7 +76,7 @@ export default function SpaceLoader({ stage, progress, failed, slow, onDone, onR
   return <section className={`space-loader ${leaving ? 'is-leaving' : ''}`} aria-label="Loading">
     <canvas ref={canvas} className="space-loader-stars" aria-hidden="true"/>
     <div className="space-loader-center">
-      <div className="space-loader-mark"><Mark/>OMAR</div>
+      <div className="space-loader-mark">OMAR</div>
       {!failed && <div className="space-loader-track" aria-hidden="true"><div ref={bar} className="space-loader-bar"/></div>}
       {failed && <div className="space-loader-failed"><p>The 3D universe couldn’t load on this device.</p><div><button className="primary" onClick={onRead}>Read about Omar ↗</button><button className="text-button" onClick={() => window.location.reload()}>Try again</button></div></div>}
       {slow && !failed && stage !== 'ready' && <button className="space-loader-slow" onClick={onRead}>Taking a while? Read about Omar instead</button>}

@@ -3,17 +3,22 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { DESTINATIONS, type Destination, type DestinationId } from './flight';
 import { THEME_PROPS } from './props';
+import { AIR } from './content';
 
 // Destination planets as little worlds: a soft clay globe in a cool tone, a thin atmosphere at the edge, its landmark
 // model on top and smaller themed models scattered over the upper half (the same ones you see when you land).
-export type PlanetLook = { base: string; spot: string; air: string; stripe?: string; ring?: string; seed: number };
+/** A planet's colours: its ground, its darker patches (and boulders), its air; optional stripe and ring; whether its
+ *  ground is Earth-like (grass, lakes and trees rather than bare rock); and its road colour if not derived from the ground. */
+export type PlanetLook = { base: string; spot: string; air: string; stripe?: string; ring?: string; seed: number; earth?: boolean; road?: string };
 export const LOOKS: Record<DestinationId, PlanetLook> = {
-  home: { base: '#4b4f9c', spot: '#3f4388', air: '#a99cff', seed: 1 },
-  experience: { base: '#5866d6', spot: '#4a56bf', air: '#a7b4ff', stripe: '#c9cdfb', seed: 3 },
-  projects: { base: '#3d8fba', spot: '#327aa1', air: '#9fdcff', ring: '#cfe0ff', seed: 7 },
-  education: { base: '#8a63d2', spot: '#7552bd', air: '#d0b8ff', seed: 11 },
-  skills: { base: '#36a59c', spot: '#2c8d86', air: '#a6f2e6', stripe: '#d4f1ec', seed: 13 },
-  contact: { base: '#c05a9a', spot: '#a64b86', air: '#ffb8e2', seed: 17 },
+  // Omar's own planet (in space it's his head) is Earth-like: grass, lakes and trees under a blue sky, grey stones, an
+  // asphalt road.
+  home: { base: '#4e9a4c', spot: '#8a9098', air: AIR.home, seed: 1, earth: true, road: '#6b7286' },
+  experience: { base: '#5866d6', spot: '#4a56bf', air: AIR.experience, stripe: '#c9cdfb', seed: 3 },
+  projects: { base: '#3d8fba', spot: '#327aa1', air: AIR.projects, ring: '#cfe0ff', seed: 7 },
+  education: { base: '#8a63d2', spot: '#7552bd', air: AIR.education, seed: 11 },
+  skills: { base: '#36a59c', spot: '#2c8d86', air: AIR.skills, stripe: '#d4f1ec', seed: 13 },
+  contact: { base: '#c05a9a', spot: '#a64b86', air: AIR.contact, seed: 17 },
 };
 export const matte = (color: string) => <meshStandardMaterial color={color} roughness={.78} metalness={0}/>;
 const noRaycast = () => null;

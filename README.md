@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-`npm run build` type-checks and builds to `dist/`. `npm test` checks flight, collisions, and that the autopilot reaches every planet from anywhere without touching a body.
+`npm run build` type-checks and builds to `dist/`. `npm test` checks flight, collisions, and that the autopilot reaches every planet from anywhere without touching a body; and, on the planets, that the road reaches every stop with the scenery kept off it, and that driving by hand respects obstacles and the edge of the area.
 
 ## Run with Docker
 
@@ -29,12 +29,15 @@ docker run -p 8080:80 omar-portfolio
 - Click a planet, its title, or a name in the bottom bar to fly there on autopilot
 - E: fly to the nearest planet (its title shows the E hint)
 - WASD / arrow keys: fly yourself; Shift: boost; R: back to the start
-- Each planet's panel ends with **Next**, to tour every planet in order
-- Esc closes a panel; touch screens get directional buttons
+- Arriving at a planet, you fall through its air, the rocket makes a powered descent onto its pad, and a rover is lowered to the ground
+- On a planet the rover is yours: WASD / arrow keys drive it (touch screens get drive pads). The painted road leads from the rocket past every stop, with a light running along it towards the next stop you haven't seen; off the road, an arrow by the rover points back to it
+- After landing, the rocket's door drops into a ramp and the rover drives out. Each stop has a painted stop line across the road. Pull up beside a station and press **E** (or tap the prompt) to unfold its board; the camera squares up to read it. E or Esc closes it, and so does driving off. The dots at the bottom show which stops you've read
+- **Fly to** goes on to the next planet; Esc returns to space
+- Touch screens get directional buttons in space
 
 ## Editing the content
 
-Everything the planets say is in `src/content.ts`: titles, headings and entries. Entries marked `TODO` are placeholders.
+Everything the planets say is in `src/content.ts`: titles, headings and entries, taken from my CV. Each entry becomes a stop on that planet's road (`label` is the short name on its tag).
 
 ## The head
 
