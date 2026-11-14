@@ -1,0 +1,206 @@
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DockBeacon, EngineTrail } from './Effects';
+import Interests from './Interests';
+import Sky, { SpaceDust } from './Sky';
+import Planets, { LOOKS } from './Planets';
+import Surface, { DESCENT, landingRig, surfaceView, type SurfaceRig } from './Surface';
+import { Rocket } from './vehicles';
+import { SECTIONS } from './content';
+import { cameraPose } from './camera';
+/** Seconds the dive into a planet takes; the landing scene takes over about two thirds of the way in. */
+const ARRIVAL_ZOOM=2.2;
+import * as THREE from 'three';
+import { DESTINATIONS, HOME, OVERVIEW, SATELLITE, destination, dockPoint, nearbyDestination, nearestDestination, newFlight, stepDock, stepFlight, type DestinationId, type Flight } from './flight';
+export type Mode = 'welcome' | 'flying' | 'docking' | 'arriving' | 'surface' | 'departing' | 'paused';
+export type Controls = { keys: Set<string>; touch: {x:number;z:number}; boost: boolean };
+type Props = {
+ mode: Mode; controls: React.RefObject<Controls>; flight: React.RefObject<Flight>;
+ reset: number; reduced: boolean; zoom: number; onArrive:()=>void; onDock:()=>void; onDepart:()=>void;
+ /** Where the autopilot is heading, and which planet the reading camera frames. */
+ destination: DestinationId; onTravel:(id:DestinationId)=>void;
+ /** Planet title elements (rendered by App); positioned over their planets every frame. */
+ labels: React.RefObject<Partial<Record<DestinationId,HTMLElement|null>>>;
+ /** The planet you're standing on (shows the landing scene instead of the solar system); the next stop not yet visited
+  *  and the stop to light up; the stop name tags and the board's HTML (both pinned in place every frame). */
+ landed: DestinationId|null; next: number|null; highlight: number|null; open: number|null;
+ stopTags: React.RefObject<(HTMLElement|null)[]>; board: React.RefObject<HTMLElement|null>;
+ onNear:(stop:number|null)=>void; onBoard:(stop:number|null)=>void; onLanded:()=>void;
+ onTelemetry:(speed:number,near:DestinationId|null,nearest:DestinationId)=>void;
+ onLoad:(stage:'model'|'renderer'|'ready',progress?:number)=>void; onFailure:()=>void;
+};
+function Orbit({ radius, color='#7d86d6', opacity=.25, position=[HOME.x,-1.8,HOME.z] }: {radius:number;color?:string;opacity?:number;position?:[number,number,number]}) {
+ const geometry=useMemo(()=>new THREE.BufferGeometry().setFromPoints(Array.from({length:161},(_,i)=>new THREE.Vector3(Math.cos(i/160*Math.PI*2)*radius,0,Math.sin(i/160*Math.PI*2)*radius))),[radius]);
+ return <lineLoop geometry={geometry} position={position}><lineBasicMaterial color={color} transparent opacity={opacity}/></lineLoop>;
+}
+/** One turn about every 40 seconds. */
+const HEAD_SPIN=.16;
+function Head({character,reduced,flight,facing,onClick}:{character:THREE.Group;reduced:boolean;flight:React.RefObject<Flight>;facing:boolean;onClick:()=>void}) {
+ const group=useRef<THREE.Group>(null),spin=useRef(0);
+ useFrame(({clock},delta)=>{
+  const g=group.current;if(!g)return;
+  const dt=Math.min(delta,.05);
+  g.rotation.z=reduced?-.025:Math.sin(clock.elapsedTime*.35)*.025;
+  if(facing||reduced){
+   // Turn to face the camera the short way round, keeping a slight glance towards the rocket.
+   const glance=THREE.MathUtils.clamp((flight.current.x-HOME.x)*.012,-.12,.12);
+   const front=Math.round((spin.current-glance)/(Math.PI*2))*Math.PI*2+glance;
+   spin.current=THREE.MathUtils.damp(spin.current,front,2.2,dt);
+  } else spin.current=(spin.current+dt*HEAD_SPIN)%(Math.PI*2);
+  // Inside the tilt towards the camera, so the head turns on its own axis.
+  g.rotation.y=spin.current;
+ });
+ return <group position={[HOME.x,.5,HOME.z]}>
+  <mesh onClick={onClick} onPointerOver={()=>document.body.style.cursor='pointer'} onPointerOut={()=>document.body.style.cursor='auto'}><sphereGeometry args={[3.9,12,8]}/><meshBasicMaterial visible={false}/></mesh>
+  <group ref={group} rotation={[-.42,0,-.025]} scale={1.08}><primitive object={character}/></group>
+ </group>;
+}
+function LabelProjector({labels}:{labels:Props['labels']}){
+ const point=useMemo(()=>new THREE.Vector3(),[]);
+ useFrame(({camera,gl})=>{
+  const map=labels.current;if(!map)return;
+  const canvas=gl.domElement.getBoundingClientRect();let parent:DOMRect|undefined;
+  for(const d of DESTINATIONS){
+   const element=map[d.id];if(!element)continue;
+   parent??=(element.offsetParent??document.body).getBoundingClientRect();
+   point.set(d.x,d.id==='home'?5.6:d.radius*1.62+.7,d.z).project(camera); // above the head, or above each planet's toy
+   const visible=point.z<1&&Math.abs(point.x)<1.05&&Math.abs(point.y)<1.05;
+   const x=canvas.left-parent.left+(point.x*.5+.5)*canvas.width,y=canvas.top-parent.top+(-point.y*.5+.5)*canvas.height;
+   element.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;
+   element.style.visibility=visible?'visible':'hidden';
+  }
+ });
+ return null;
+}
+function Scene(props:Props) {
+ // The clay head is prepared by scripts/prepare-clay-head.mjs: already centred, 7.3 units tall, ring and holes removed.
+ // Toy-style head generated in Meshy (Smart Topology, from docs/art/meshy/toy/front.png) and prepared with
+ // PARTS=0.004 node scripts/prepare-clay-head.mjs docs/art/meshy/toy/meshy-toy-raw.glb public/models/omar-meshy-toy.glb
+ const gltf=useLoader(GLTFLoader,'/models/omar-meshy-toy.glb',undefined,event=>props.onLoad('model',event.lengthComputable?event.loaded/event.total:undefined));
+ const character=useMemo(()=>{
+  const model=gltf.scene.clone(true);
+  model.traverse(object=>{const mesh=object as THREE.Mesh;if(mesh.isMesh)mesh.raycast=()=>{};});
+  return model;
+ },[gltf]);
+ const {gl,scene,camera}=useThree();
+ const callbacks=useRef({onLoad:props.onLoad,onFailure:props.onFailure});
+ callbacks.current={onLoad:props.onLoad,onFailure:props.onFailure};
+ const compiled=useRef(false),readySent=useRef(false);
+ useEffect(()=>{
+  let cancelled=false;
+  callbacks.current.onLoad('renderer');
+  gl.compileAsync(scene,camera).then(()=>{if(!cancelled)compiled.current=true;}).catch(()=>{if(!cancelled)callbacks.current.onFailure();});
+  const lost=(event:Event)=>{event.preventDefault();callbacks.current.onFailure();};
+  gl.domElement.addEventListener('webglcontextlost',lost);
+  return()=>{cancelled=true;gl.domElement.removeEventListener('webglcontextlost',lost);};
+ },[gl,scene,camera]);
+ const rocket=useRef<THREE.Group>(null),thrust=useRef(0),lastReset=useRef(props.reset),ticker=useRef(0);
+ const compactViewport=useRef(window.matchMedia('(max-width: 760px)'));
+ const cameraTarget=useMemo(()=>new THREE.Vector3(OVERVIEW.x,0,OVERVIEW.z),[]);
+ const desiredCamera=useMemo(()=>new THREE.Vector3(),[]),desiredTarget=useMemo(()=>new THREE.Vector3(),[]);
+ const previousLanded=useRef<DestinationId|null>(null);
+ const rig=useRef<SurfaceRig>(landingRig()),heading=useMemo(()=>new THREE.Vector3(0,0,-1),[]);
+ // The dive into a planet before landing: where the camera started, where it was looking, and how far in it is.
+ const arrival=useRef<{t:number;from:THREE.Vector3;look:THREE.Vector3;docked:boolean}|null>(null);
+ // On the ground, distant scenery fades into the planet's air, which sells the scale; up in space there is no haze.
+ useEffect(()=>{scene.fog=props.landed?new THREE.Fog(new THREE.Color(LOOKS[props.landed].air).multiplyScalar(.34),12,62):null;return()=>{scene.fog=null;};},[scene,props.landed]);
+ useFrame((_,delta)=>{
+  const dt=Math.min(delta,.05);const {controls,flight,mode}=props;
+  if(mode!=='arriving')arrival.current=null;
+  if(compiled.current&&!readySent.current){readySent.current=true;requestAnimationFrame(()=>callbacks.current.onLoad('ready'));}
+  if(lastReset.current!==props.reset){flight.current=newFlight();lastReset.current=props.reset;}
+  const keys=controls.current.keys;
+  const x=Number(keys.has('d')||keys.has('arrowright'))-Number(keys.has('a')||keys.has('arrowleft'))+controls.current.touch.x;
+  const z=Number(keys.has('s')||keys.has('arrowdown'))-Number(keys.has('w')||keys.has('arrowup'))+controls.current.touch.z;
+  const boost=keys.has('shift')||controls.current.boost;
+  if(mode==='flying')flight.current=stepFlight(flight.current,{x,z,boost},dt);
+  const target=destination(props.destination);
+  if(mode==='docking'){
+   flight.current=stepDock(flight.current,dt,target);
+   const dock=dockPoint(target);
+   if(Math.hypot(flight.current.x-dock.x,flight.current.z-dock.z)<.08)props.onArrive();
+  }
+  thrust.current=mode==='docking'?.7:mode==='flying'&&!!(x||z)?(boost?1.6:1):0;
+  const f=flight.current;
+  if(rocket.current){rocket.current.position.set(f.x,.3,f.z);const diff=Math.atan2(Math.sin(f.angle-rocket.current.rotation.y),Math.cos(f.angle-rocket.current.rotation.y));rocket.current.rotation.y+=diff*(1-Math.exp(-9*dt));}
+  const perspective=camera as THREE.PerspectiveCamera;
+  // Entering or leaving a planet happens under the warp flash: jump the camera straight to the new scene.
+  if(previousLanded.current!==props.landed){
+   if(props.landed){rig.current=landingRig();heading.set(0,0,-1);}
+   const pose=props.landed?surfaceView(rig.current,heading,compactViewport.current.matches):{...cameraPose('planet',f,compactViewport.current.matches,props.zoom,false,target),up:new THREE.Vector3(0,1,0)};
+   camera.position.set(pose.position.x,pose.position.y,pose.position.z);cameraTarget.set(pose.target.x,pose.target.y,pose.target.z);camera.up.copy(pose.up);camera.lookAt(cameraTarget);
+   perspective.fov=pose.fov;perspective.updateProjectionMatrix();previousLanded.current=props.landed;
+  }
+  if(props.landed){
+   // Chase the rover. The heading the camera sits behind turns more lazily than the rover, so U-turns swing round smoothly.
+   heading.lerp(rig.current.forward,props.reduced?1:1-Math.exp(-1.6*dt)).normalize();
+   // Ride the descent tightly (the rocket falls fast); ease into the other views.
+   const r=rig.current,pose=surfaceView(r,heading,compactViewport.current.matches),rate=r.time<DESCENT?10:r.focus?2.8:2.4,blend=props.reduced?1:1-Math.exp(-rate*dt);
+   camera.position.lerp(pose.position,blend);cameraTarget.lerp(pose.target,blend);camera.up.lerp(pose.up,blend).normalize();camera.lookAt(cameraTarget);
+   if(r.shake>0){const time=performance.now()/1000;camera.position.x+=Math.sin(time*61)*r.shake;camera.position.y+=Math.sin(time*47+1)*r.shake;camera.position.z+=Math.sin(time*53+2)*r.shake*.6;}
+   perspective.fov=THREE.MathUtils.lerp(perspective.fov,pose.fov,blend);perspective.updateProjectionMatrix();
+  } else if(mode==='arriving'){
+   // Zoom into the planet: dive at its surface, faster and faster, until it fills the view; part way in, the entry
+   // haze floods the screen and the landing scene takes over (still diving), so it reads as one fall through the air.
+   const a=arrival.current??=(arrival.current={t:0,from:camera.position.clone(),look:cameraTarget.clone(),docked:false});
+   a.t+=dt;
+   const k=props.reduced?1:Math.min(1,a.t/ARRIVAL_ZOOM),centre=new THREE.Vector3(target.x,target.id==='home'?.5:0,target.z);
+   // A true zoom: the distance to the planet shrinks by the same factor every moment, so the planet swells steadily to
+   // fill the screen; meanwhile the camera swings round to come in from 29° above its side, clear of the landmark on top.
+   const side=new THREE.Vector3(a.from.x-centre.x,0,a.from.z-centre.z).normalize().multiplyScalar(Math.cos(.5)).setY(Math.sin(.5));
+   const start=a.from.distanceTo(centre),end=target.radius*1.1,ease=k*k*(3-2*k);
+   const direction=a.from.clone().sub(centre).normalize().lerp(side,ease).normalize();
+   camera.position.copy(centre).addScaledVector(direction,start*Math.pow(end/start,Math.pow(k,1.15)));
+   cameraTarget.lerpVectors(a.look,centre,THREE.MathUtils.smoothstep(k,0,.45));camera.lookAt(cameraTarget);
+   perspective.fov=THREE.MathUtils.lerp(perspective.fov,40,1-Math.exp(-2*dt));perspective.updateProjectionMatrix();
+   if(k>=.7&&!a.docked){a.docked=true;props.onDock();}
+  } else if(mode!=='paused'){
+   const view=mode==='welcome'?'overview':'flight';
+   const pose=cameraPose(view,f,compactViewport.current.matches,props.zoom,boost&&!props.reduced,target);
+   desiredCamera.set(pose.position.x,pose.position.y,pose.position.z);desiredTarget.set(pose.target.x,pose.target.y,pose.target.z);
+   const blend=props.reduced?1:1-Math.exp(-3*dt);
+   camera.position.lerp(desiredCamera,blend);cameraTarget.lerp(desiredTarget,blend);camera.lookAt(cameraTarget);
+   perspective.fov=THREE.MathUtils.lerp(perspective.fov,pose.fov,blend);perspective.updateProjectionMatrix();
+   const settled=camera.position.distanceTo(desiredCamera)<.15&&cameraTarget.distanceTo(desiredTarget)<.15;
+   if(settled&&mode==='departing')props.onDepart();
+  }
+  ticker.current+=dt;
+  if(ticker.current>.12){props.onTelemetry(Math.hypot(f.vx,f.vz),nearbyDestination(f),nearestDestination(f));ticker.current=0;}
+ },-1); // camera first, so everything else this frame sees the updated view
+ return <>
+  <color attach="background" args={['#03050a']}/>
+  {/* Light like real space: one strong key light from a distant star gives every planet a lit and a shadowed side;
+      a cool rim from behind and a low violet fill keep the dark sides readable. */}
+  <ambientLight intensity={.32}/><hemisphereLight args={['#b9c4ff','#1a1035',.55]}/>
+  <directionalLight position={[-16,14,12]} intensity={3.1} color="#fff6ec"/><directionalLight position={[14,6,-16]} intensity={1.1} color="#7d8cff"/>
+  <directionalLight position={[2,4,20]} intensity={.55} color="#c8ccff"/>
+  <Sky reduced={props.reduced}/>
+  <group visible={!props.landed}>
+  <Orbit radius={9} opacity={.14}/><Orbit radius={18} opacity={.1}/><Orbit radius={25} opacity={.07}/>
+  <SpaceDust/>
+  <DockBeacon target={destination(props.destination)} active={props.mode==='docking'||props.mode==='arriving'} reduced={props.reduced}/><Head character={character} flight={props.flight} reduced={props.reduced} facing={props.mode==='paused'||(props.destination==='home'&&['docking','arriving'].includes(props.mode))} onClick={()=>props.onTravel('home')}/><Interests reduced={props.reduced}/>
+  <Planets reduced={props.reduced} onSelect={props.onTravel}/><LabelProjector labels={props.labels}/>
+  <group position={[...SATELLITE.position]} rotation={[.1,.2,-.35]}>
+   <mesh><boxGeometry args={[.6,.6,.65]}/><meshStandardMaterial color="#dec9a4" metalness={.45}/></mesh>
+   {[-1,1].map(s=><mesh key={s} position={[s*.95,0,0]}><boxGeometry args={[1.1,.07,.65]}/><meshStandardMaterial color="#496b82" metalness={.5}/></mesh>)}
+   <mesh position={[0,.5,0]}><cylinderGeometry args={[.025,.025,.7,8]}/><meshStandardMaterial color="#d6c3a1"/></mesh>
+  </group>
+  <group ref={rocket}><Rocket thrust={thrust} reduced={props.reduced}/></group><EngineTrail flight={props.flight} thrust={thrust} enabled={props.mode==='flying'||props.mode==='docking'} reduced={props.reduced} reset={props.reset}/>
+  </group>
+  {props.landed&&<Surface key={props.landed} id={props.landed} count={SECTIONS[props.landed].entries.length} character={character} reduced={props.reduced} rig={rig} controls={props.controls}
+   tags={props.stopTags} board={props.board} next={props.next} highlight={props.highlight} open={props.open} onNear={props.onNear} onBoard={props.onBoard} onLanded={props.onLanded}/>}
+ </>;
+}
+/** Frame statistics overlay, shown with ?perf in the URL. */
+function FrameStats({onStats}:{onStats:(value:string)=>void}){
+ const {gl}=useThree();
+ const frames=useRef(0),elapsed=useRef(0);
+ useFrame((_,dt)=>{frames.current++;elapsed.current+=dt;if(elapsed.current>1){onStats(`${Math.round(frames.current/elapsed.current)} fps · ${gl.info.render.triangles.toLocaleString()} triangles · ${gl.info.render.calls} draw calls`);frames.current=0;elapsed.current=0;}});
+ return null;
+}
+export default function World(props:Props){
+ const [stats,setStats]=useState('');
+ const showStats=new URLSearchParams(window.location.search).has('perf');
+ return <><Canvas camera={{position:[OVERVIEW.x,24,OVERVIEW.z+34],fov:44,near:.1,far:220}} onCreated={({camera})=>camera.lookAt(OVERVIEW.x,0,OVERVIEW.z)} dpr={[1,1.75]} gl={{antialias:true,alpha:false,powerPreference:'high-performance'}}>{showStats&&<FrameStats onStats={setStats}/>}<Suspense fallback={null}><Scene {...props}/></Suspense></Canvas>{showStats&&<output style={{position:'fixed',bottom:4,left:4,zIndex:100,fontSize:11,color:'white',background:'#000c',padding:5}}>{stats}</output>}</>;
+}
