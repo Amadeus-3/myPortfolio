@@ -1,0 +1,24 @@
+# Keep the build context small: only what the site build needs.
+node_modules
+dist
+*.tsbuildinfo
+.git
+.gitignore
+.claude
+.vscode
+.idea
+.DS_Store
+*.log
+.env
+.env.*
+
+# Art sources (photos, reference sheets, raw models: over 1 GB) and local tooling
+docs
+tmp
+scripts/archive
+model-preview.html
+repair-preview.html
+
+Dockerfile
+docker-compose.yml
+.dockerignore
