@@ -15,13 +15,19 @@ const FORWARD = direction(0, -35), RIGHT = new THREE.Vector3(1, 0, 0), UP = new 
 const BAND_TANGENT = RIGHT.clone().multiplyScalar(Math.cos(.6)).addScaledVector(UP, Math.sin(.6)).normalize();
 const BAND_NORMAL = new THREE.Vector3().crossVectors(FORWARD, BAND_TANGENT).normalize();
 const CORE = FORWARD.clone().multiplyScalar(Math.cos(.42)).addScaledVector(BAND_TANGENT, -Math.sin(.42)).normalize();
-const NEBULAE = [{ at: direction(-30, -20), color: 'vec3(.42,.12,.26)' }, { at: direction(28, -52), color: 'vec3(.10,.24,.30)' }];
+// Violet and deep-blue emission clouds; some low in the orbit view, some above the horizon for when you've landed.
+const NEBULAE = [
+  { at: direction(-30, -20), color: 'vec3(.34,.12,.50)' }, { at: direction(28, -50), color: 'vec3(.08,.16,.46)' },
+  { at: direction(-22, 10), color: 'vec3(.26,.10,.44)' }, { at: direction(34, 16), color: 'vec3(.07,.14,.40)' },
+];
 const GALAXIES = [
   { at: direction(-27, -30), size: .012, tilt: .5, squash: .38, color: 'vec3(1.,.86,.72)' },
   { at: direction(26, -40), size: .009, tilt: -.9, squash: .55, color: 'vec3(.80,.86,1.)' },
   { at: direction(-15, -54), size: .007, tilt: 1.3, squash: .3, color: 'vec3(1.,.9,.82)' },
   { at: direction(19, -55), size: .010, tilt: .2, squash: .7, color: 'vec3(.92,.88,1.)' },
   { at: direction(-6, -17), size: .006, tilt: -.4, squash: .45, color: 'vec3(1.,.92,.85)' },
+  { at: direction(-38, 14), size: .011, tilt: .8, squash: .4, color: 'vec3(.86,.84,1.)' },
+  { at: direction(12, 22), size: .008, tilt: -1.1, squash: .6, color: 'vec3(.95,.9,1.)' },
 ];
 
 const domeVertex = `varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
@@ -51,7 +57,7 @@ void main(){
   float band = exp(-h * h / (.03 + .05 * core)) * (.45 + .95 * n);
   float dust = exp(-pow(h + .035 * (n2 - .5), 2.0) / .0025) * smoothstep(.38, .72, n2);
   float milky = band * (.5 + 1.4 * core) * (1.0 - .8 * dust);
-  col += milky * mix(vec3(.24, .28, .40), vec3(.62, .49, .36), core) * .42;
+  col += milky * mix(vec3(.20, .24, .46), vec3(.60, .52, .68), core) * .44;
   col += band * smoothstep(.5, .85, fbm(d * 34.0)) * vec3(.10, .10, .12);
   // Faint emission nebulae.
   ${NEBULAE.map(nb => `col += ${nb.color} * smoothstep(.48, .9, fbm(d * 2.6 + ${glsl(nb.at)} * 4.0)) * exp(-pow(distance(d, ${glsl(nb.at)}), 2.0) / .05) * .5;`).join('\n  ')}
@@ -63,18 +69,21 @@ void main(){
 const starVertex = `
 attribute float aSize; attribute vec3 aColor; attribute float aPhase;
 uniform float uTime; uniform float uPixelRatio;
-varying vec3 vColor;
+varying vec3 vColor; varying float vSpike;
 void main(){
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   float twinkle = .82 + .18 * sin(uTime * (.8 + aPhase) + aPhase * 40.0);
-  gl_PointSize = aSize * uPixelRatio;
+  vSpike = aSize > 7.2 ? 1.0 : 0.0; // only the brightest stars show diffraction spikes
+  gl_PointSize = aSize * uPixelRatio * (1.0 + vSpike * 2.4);
   vColor = aColor * twinkle;
 }`;
 const starFragment = `
-varying vec3 vColor;
+varying vec3 vColor; varying float vSpike;
 void main(){
-  float r = length(gl_PointCoord - .5) * 2.0;
+  vec2 q = (gl_PointCoord - .5) * 2.0;
+  float r = length(q) * (1.0 + vSpike * 2.4);
   float light = exp(-r * r * 14.0) + exp(-r * r * 3.0) * .22;
+  light += vSpike * (exp(-abs(q.x) * 34.0) * exp(-abs(q.y) * 2.6) + exp(-abs(q.y) * 34.0) * exp(-abs(q.x) * 2.6)) * .32;
   if (light < .01) discard;
   gl_FragColor = vec4(vColor * light, light);
 }`;
@@ -127,4 +136,17 @@ export default function Sky({ reduced }: { reduced: boolean }) {
     </mesh>
     <StarField reduced={reduced}/>
   </group>;
+}
+
+/**
+ * Faint dust drifting in the play area. Unlike the sky it stays put in the world, so it slides past as you fly
+ * and gives a sense of depth and speed.
+ */
+export function SpaceDust() {
+  const geometry = useMemo(() => {
+    const rand = random(77), count = 900, position = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) position.set([(rand() - .5) * 110, -14 + rand() * 22, (rand() - .5) * 100], i * 3);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(position, 3)); return g;
+  }, []);
+  return <points geometry={geometry}><pointsMaterial color="#a9b2ff" size={.07} sizeAttenuation transparent opacity={.38} depthWrite={false}/></points>;
 }

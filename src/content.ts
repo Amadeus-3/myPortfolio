@@ -1,7 +1,7 @@
 import type { DestinationId } from './flight';
 
-// Everything the planets say lives here. Edit freely: titles appear above the planets and in the destination bar,
-// and each section opens in the side panel when the rocket arrives.
+// Everything the planets say lives here. Titles appear above the planets and in the destination bar; each section's
+// entries become the floating cards you find when you land on that planet.
 // Entries marked TODO are placeholders waiting for Omar's real details.
 
 export const TITLES: Record<DestinationId, string> = {
@@ -16,7 +16,16 @@ export const TITLES: Record<DestinationId, string> = {
 export type Entry = { title: string; meta?: string; text?: string; link?: { label: string; href: string } };
 export type Section = { heading: string; lead: string; entries: Entry[] };
 
-export const SECTIONS: Record<Exclude<DestinationId, 'home'>, Section> = {
+export const SECTIONS: Record<DestinationId, Section> = {
+  home: {
+    heading: 'Hey, I’m Omar.',
+    lead: 'Creative ideas. Complex problems. Useful software.',
+    entries: [
+      { title: 'Who I am', text: 'A software developer who enjoys building creative, complex apps that are genuinely useful to the people using them.' },
+      { title: 'What’s in my orbit', text: 'Boxing, music, cinema, painting and philosophy: different ways to move, feel, see and ask questions.' },
+      { title: 'What drives me', text: 'The challenge of making something creative and complex feel simple to use.' },
+    ],
+  },
   experience: {
     heading: 'Where I’ve worked',
     lead: 'The teams and products that shaped how I build.',

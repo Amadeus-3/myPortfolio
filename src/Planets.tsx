@@ -1,103 +1,71 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { DESTINATIONS, type Destination, type DestinationId } from './flight';
+import { THEME_PROPS } from './props';
 
-// Destination planets as clay toys, in the same language as the head: smooth matte forms, soft warm palette,
-// no textures. Each planet carries a few clay spots, sometimes a stripe or ring, and a little themed toy on top.
-type PlanetId = Exclude<DestinationId, 'home'>;
-type Look = { base: string; spot: string; stripe?: string; ring?: string; seed: number };
-const LOOKS: Record<PlanetId, Look> = {
-  experience: { base: '#e6a47c', spot: '#d48b62', stripe: '#f3e3cb', seed: 3 },
-  projects: { base: '#9fbfcf', spot: '#86aabd', ring: '#f3e3cb', seed: 7 },
-  education: { base: '#b8a7d5', spot: '#a290c6', seed: 11 },
-  skills: { base: '#a6c8a1', spot: '#8db488', stripe: '#eef0d8', seed: 13 },
-  contact: { base: '#f0b8a3', spot: '#e39d86', seed: 17 },
+// Destination planets as little worlds: a soft clay globe in a cool tone, a thin atmosphere at the edge, its landmark
+// model on top and smaller themed models scattered over the upper half (the same ones you see when you land).
+export type PlanetLook = { base: string; spot: string; air: string; stripe?: string; ring?: string; seed: number };
+export const LOOKS: Record<DestinationId, PlanetLook> = {
+  home: { base: '#4b4f9c', spot: '#3f4388', air: '#a99cff', seed: 1 },
+  experience: { base: '#5866d6', spot: '#4a56bf', air: '#a7b4ff', stripe: '#c9cdfb', seed: 3 },
+  projects: { base: '#3d8fba', spot: '#327aa1', air: '#9fdcff', ring: '#cfe0ff', seed: 7 },
+  education: { base: '#8a63d2', spot: '#7552bd', air: '#d0b8ff', seed: 11 },
+  skills: { base: '#36a59c', spot: '#2c8d86', air: '#a6f2e6', stripe: '#d4f1ec', seed: 13 },
+  contact: { base: '#c05a9a', spot: '#a64b86', air: '#ffb8e2', seed: 17 },
 };
-const matte = (color: string) => <meshStandardMaterial color={color} roughness={.85} metalness={0}/>;
+export const matte = (color: string) => <meshStandardMaterial color={color} roughness={.78} metalness={0}/>;
 const noRaycast = () => null;
-
-function random(seed: number) {
+export function random(seed: number) {
   return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
 
-// ---------- The little toys that sit on top of each planet (built at roughly unit size) ----------
-function Briefcase() {
-  return <group rotation={[0, -.35, .08]}>
-    <mesh position={[0, .38, 0]}><boxGeometry args={[1.2, .76, .46]}/>{matte('#8a5634')}</mesh>
-    <mesh position={[0, .52, .235]}><boxGeometry args={[1.21, .07, .02]}/>{matte('#6b4027')}</mesh>
-    <mesh position={[0, .55, .24]}><boxGeometry args={[.16, .14, .03]}/>{matte('#eed9a0')}</mesh>
-    <mesh position={[0, .8, 0]} rotation={[0, 0, 0]}><torusGeometry args={[.2, .055, 10, 24, Math.PI]}/>{matte('#5e3a24')}</mesh>
-  </group>;
+const airVertex = `varying vec3 vNormal; varying vec3 vView; void main(){ vec4 p = modelViewMatrix * vec4(position, 1.0); vNormal = normalize(normalMatrix * normal); vView = normalize(-p.xyz); gl_Position = projectionMatrix * p; }`;
+const airFragment = `uniform vec3 tint; uniform float strength; varying vec3 vNormal; varying vec3 vView; void main(){ float rim = pow(1.0 - abs(dot(vNormal, vView)), 3.0); gl_FragColor = vec4(tint * rim * strength, rim * strength); }`;
+/** A thin atmosphere: brightest at the planet's edge, invisible face-on. */
+export function Atmosphere({ radius, color, strength = .55 }: { radius: number; color: string; strength?: number }) {
+  const uniforms = useMemo(() => ({ tint: { value: new THREE.Color(color) }, strength: { value: strength } }), [color, strength]);
+  return <mesh scale={radius} raycast={noRaycast}><sphereGeometry args={[1, 48, 32]}/>
+    <shaderMaterial vertexShader={airVertex} fragmentShader={airFragment} uniforms={uniforms} transparent depthWrite={false} blending={THREE.AdditiveBlending}/></mesh>;
 }
-function Blocks() {
-  return <group rotation={[0, .4, 0]}>
-    <mesh position={[-.3, .27, 0]}><boxGeometry args={[.54, .54, .54]}/>{matte('#e9a083')}</mesh>
-    <mesh position={[.3, .24, .08]} rotation={[0, .5, 0]}><boxGeometry args={[.48, .48, .48]}/>{matte('#eed9a0')}</mesh>
-    <mesh position={[-.05, .78, .02]} rotation={[0, .9, 0]}><boxGeometry args={[.46, .46, .46]}/>{matte('#9fbf9f')}</mesh>
-  </group>;
+/** A transform that stands an object on a sphere's surface, pointing outward. */
+export function onSphere(direction: THREE.Vector3, radius: number) {
+  const d = direction.clone().normalize();
+  return { position: d.clone().multiplyScalar(radius), quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d) };
 }
-function GraduationCap() {
-  return <group rotation={[0, .5, 0]}>
-    <mesh position={[0, .22, 0]}><cylinderGeometry args={[.42, .48, .42, 32]}/>{matte('#33405a')}</mesh>
-    <mesh position={[0, .47, 0]} rotation={[0, Math.PI / 4, 0]}><boxGeometry args={[1.15, .09, 1.15]}/>{matte('#2b3650')}</mesh>
-    <mesh position={[0, .53, 0]}><sphereGeometry args={[.07, 16, 12]}/>{matte('#e9a083')}</mesh>
-    <mesh position={[.42, .3, .1]} rotation={[0, 0, .1]}><cylinderGeometry args={[.025, .025, .42, 8]}/>{matte('#e9a083')}</mesh>
-    <mesh position={[.43, .07, .1]}><sphereGeometry args={[.07, 16, 12]}/>{matte('#e9a083')}</mesh>
-  </group>;
-}
-function Star() {
-  const geometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    for (let i = 0; i < 10; i++) {
-      const angle = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? .26 : .6;
-      if (i) shape.lineTo(Math.cos(angle) * r, Math.sin(angle) * r); else shape.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
-    }
-    shape.closePath();
-    const g = new THREE.ExtrudeGeometry(shape, { depth: .18, bevelEnabled: true, bevelThickness: .09, bevelSize: .08, bevelSegments: 6, curveSegments: 4 });
-    g.center(); return g;
-  }, []);
-  return <mesh geometry={geometry} position={[0, .62, 0]} rotation={[0, .4, 0]}>{matte('#f2d27a')}</mesh>;
-}
-function SpeechBubble() {
-  return <group position={[0, .5, 0]} rotation={[0, -.3, 0]}>
-    <mesh scale={[.62, .46, .3]}><sphereGeometry args={[1, 32, 24]}/>{matte('#f3e6d0')}</mesh>
-    <mesh position={[-.3, -.42, 0]} rotation={[0, 0, -.55]}><coneGeometry args={[.13, .3, 16]}/>{matte('#f3e6d0')}</mesh>
-    {[-.22, 0, .22].map(x => <mesh key={x} position={[x, 0, .29]} scale={[1, 1, .5]}><sphereGeometry args={[.065, 16, 12]}/>{matte('#8a5634')}</mesh>)}
-  </group>;
-}
-const TOYS: Record<PlanetId, () => ReactNode> = { experience: Briefcase, projects: Blocks, education: GraduationCap, skills: Star, contact: SpeechBubble };
 
 function Planet({ destination, reduced, onSelect }: { destination: Destination; reduced: boolean; onSelect: (id: DestinationId) => void }) {
-  const id = destination.id as PlanetId, look = LOOKS[id], r = destination.radius, Toy = TOYS[id];
-  // Soft clay spots: small spheres half-sunk into the surface, a shade darker than the planet.
-  const spots = useMemo(() => {
+  const look = LOOKS[destination.id], r = destination.radius, props = THEME_PROPS[destination.id];
+  const Landmark = props[0];
+  const layout = useMemo(() => {
     const rand = random(look.seed);
-    return Array.from({ length: 7 }, () => {
-      const direction = new THREE.Vector3(rand() * 2 - 1, rand() * 1.4 - .5, rand() * 2 - 1).normalize();
-      const size = r * (.16 + rand() * .16);
-      return { position: direction.clone().multiplyScalar(r * .97), quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction), size };
+    const spots = Array.from({ length: 8 }, () => ({ ...onSphere(new THREE.Vector3(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1), r * .97), size: r * (.14 + rand() * .14) }));
+    // Smaller models around the upper half, evenly spread, skipping the very top where the landmark stands.
+    const scattered = Array.from({ length: 7 }, (_, i) => {
+      const angle = i / 7 * Math.PI * 2 + rand() * .4, height = .3 + rand() * .35;
+      const direction = new THREE.Vector3(Math.cos(angle) * Math.sqrt(1 - height * height), height, Math.sin(angle) * Math.sqrt(1 - height * height));
+      return { ...onSphere(direction, r * .985), Toy: props[1 + i % (props.length - 1)], spin: rand() * Math.PI * 2, scale: r * (.17 + rand() * .05) };
     });
-  }, [look.seed, r]);
-  const body = useRef<THREE.Group>(null), toy = useRef<THREE.Group>(null);
-  useFrame(({ clock }, delta) => {
-    if (reduced) return;
-    if (body.current) body.current.rotation.y += delta * .06;
-    if (toy.current) { toy.current.position.y = r * .96 + Math.sin(clock.elapsedTime * 1.2 + look.seed) * .06; toy.current.rotation.y = Math.sin(clock.elapsedTime * .4 + look.seed) * .25; }
-  });
+    return { spots, scattered };
+  }, [look.seed, r, props]);
+  const body = useRef<THREE.Group>(null);
+  useFrame((_, delta) => { if (body.current && !reduced) body.current.rotation.y += delta * .05; });
   const select = (event: { stopPropagation: () => void }) => { event.stopPropagation(); onSelect(destination.id); };
   return <group position={[destination.x, 0, destination.z]} onClick={select}
     onPointerOver={() => { document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = 'auto'; }}>
     <group ref={body}>
-      <mesh><sphereGeometry args={[r, 64, 48]}/>{matte(look.base)}</mesh>
-      {spots.map((spot, i) => <mesh key={i} position={spot.position} quaternion={spot.quaternion} scale={[spot.size, spot.size * .45, spot.size]} raycast={noRaycast}>
+      <mesh><sphereGeometry args={[r, 72, 54]}/>{matte(look.base)}</mesh>
+      {layout.spots.map((spot, i) => <mesh key={i} position={spot.position} quaternion={spot.quaternion} scale={[spot.size, spot.size * .4, spot.size]} raycast={noRaycast}>
         <sphereGeometry args={[1, 24, 16]}/>{matte(look.spot)}</mesh>)}
-      {look.stripe && <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1, 1, .7]} raycast={noRaycast}><torusGeometry args={[r * .99, r * .1, 16, 96]}/>{matte(look.stripe)}</mesh>}
+      {look.stripe && <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1, 1, .6]} raycast={noRaycast}><torusGeometry args={[r * .99, r * .08, 16, 120]}/>{matte(look.stripe)}</mesh>}
+      {layout.scattered.map(({ position, quaternion, Toy, spin, scale }, i) => <group key={i} position={position} quaternion={quaternion}>
+        <group rotation={[0, spin, 0]} scale={scale}><Toy/></group></group>)}
+      <group position={[0, r * .97, 0]} scale={r * .42}><Landmark/></group>
     </group>
-    {look.ring && destination.ring && <mesh rotation={[Math.PI / 2 - .22, .1, 0]} scale={[1, 1, .32]} raycast={noRaycast}>
-      <torusGeometry args={[(r * 1.35 + destination.ring) / 2, (destination.ring - r * 1.35) / 2, 20, 96]}/>{matte(look.ring)}</mesh>}
-    {/* Tipped towards the camera, which looks down from the front, so the toy reads at a glance. */}
-    <group ref={toy} position={[0, r * .96, 0]} rotation={[.38, 0, 0]} scale={r * .85}><Toy/></group>
+    <Atmosphere radius={r * 1.06} color={look.air}/>
+    {look.ring && destination.ring && <mesh rotation={[Math.PI / 2 - .22, .1, 0]} scale={[1, 1, .3]} raycast={noRaycast}>
+      <torusGeometry args={[(r * 1.4 + destination.ring) / 2, (destination.ring - r * 1.4) / 2, 20, 120]}/>{matte(look.ring)}</mesh>}
   </group>;
 }
 

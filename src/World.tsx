@@ -3,12 +3,14 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DockBeacon, EngineTrail } from './Effects';
 import Interests from './Interests';
-import Sky from './Sky';
-import Planets from './Planets';
+import Sky, { SpaceDust } from './Sky';
+import Planets, { LOOKS } from './Planets';
+import Surface, { surfaceCamera, surfaceLayout } from './Surface';
+import { SECTIONS } from './content';
 import { cameraPose } from './camera';
 import * as THREE from 'three';
 import { DESTINATIONS, HOME, OVERVIEW, SATELLITE, destination, dockPoint, nearbyDestination, nearestDestination, newFlight, stepDock, stepFlight, type DestinationId, type Flight } from './flight';
-export type Mode = 'welcome' | 'flying' | 'docking' | 'arriving' | 'reading' | 'departing' | 'paused';
+export type Mode = 'welcome' | 'flying' | 'docking' | 'arriving' | 'surface' | 'departing' | 'paused';
 export type Controls = { keys: Set<string>; touch: {x:number;z:number}; boost: boolean };
 type Props = {
  mode: Mode; controls: React.RefObject<Controls>; flight: React.RefObject<Flight>;
@@ -17,10 +19,12 @@ type Props = {
  destination: DestinationId; onTravel:(id:DestinationId)=>void;
  /** Planet title elements (rendered by App); positioned over their planets every frame. */
  labels: React.RefObject<Partial<Record<DestinationId,HTMLElement|null>>>;
+ /** The planet you're standing on (shows the landing scene instead of the solar system), and its content cards. */
+ landed: DestinationId|null; cards: React.RefObject<(HTMLElement|null)[]>;
  onTelemetry:(speed:number,near:DestinationId|null,nearest:DestinationId)=>void;
  onLoad:(stage:'model'|'renderer'|'ready',progress?:number)=>void; onFailure:()=>void;
 };
-function Orbit({ radius, color='#4a666d', opacity=.25, position=[HOME.x,-1.8,HOME.z] }: {radius:number;color?:string;opacity?:number;position?:[number,number,number]}) {
+function Orbit({ radius, color='#7d86d6', opacity=.25, position=[HOME.x,-1.8,HOME.z] }: {radius:number;color?:string;opacity?:number;position?:[number,number,number]}) {
  const geometry=useMemo(()=>new THREE.BufferGeometry().setFromPoints(Array.from({length:161},(_,i)=>new THREE.Vector3(Math.cos(i/160*Math.PI*2)*radius,0,Math.sin(i/160*Math.PI*2)*radius))),[radius]);
  return <lineLoop geometry={geometry} position={position}><lineBasicMaterial color={color} transparent opacity={opacity}/></lineLoop>;
 }
@@ -46,6 +50,22 @@ function Head({character,reduced,flight,facing,onClick}:{character:THREE.Group;r
   <group ref={group} rotation={[-.42,0,-.025]} scale={1.08}><primitive object={character}/></group>
  </group>;
 }
+/** Pins each content card over its beacon on the planet surface (positions written directly, no re-render). */
+function CardProjector({cards,anchors}:{cards:Props['cards'];anchors:THREE.Vector3[]}){
+ const point=useMemo(()=>new THREE.Vector3(),[]);
+ useFrame(({camera,gl})=>{
+  const list=cards.current;if(!list)return;
+  const canvas=gl.domElement.getBoundingClientRect();let parent:DOMRect|undefined;
+  anchors.forEach((anchor,i)=>{
+   const element=list[i];if(!element)return;
+   parent??=(element.offsetParent??document.body).getBoundingClientRect();
+   point.copy(anchor).project(camera);
+   const x=canvas.left-parent.left+(point.x*.5+.5)*canvas.width,y=canvas.top-parent.top+(-point.y*.5+.5)*canvas.height;
+   element.style.setProperty('--x',`${x.toFixed(1)}px`);element.style.setProperty('--y',`${y.toFixed(1)}px`);
+  });
+ });
+ return null;
+}
 /** Pins each planet's title just above it on screen. Writes styles directly, so nothing re-renders per frame. */
 function LabelProjector({labels}:{labels:Props['labels']}){
  const point=useMemo(()=>new THREE.Vector3(),[]);
@@ -55,7 +75,7 @@ function LabelProjector({labels}:{labels:Props['labels']}){
   for(const d of DESTINATIONS){
    const element=map[d.id];if(!element)continue;
    parent??=(element.offsetParent??document.body).getBoundingClientRect();
-   point.set(d.x,d.id==='home'?5.6:d.radius*1.95+.6,d.z).project(camera); // above the head, or above each planet's toy
+   point.set(d.x,d.id==='home'?5.6:d.radius*1.62+.7,d.z).project(camera); // above the head, or above each planet's toy
    const visible=point.z<1&&Math.abs(point.x)<1.05&&Math.abs(point.y)<1.05;
    const x=canvas.left-parent.left+(point.x*.5+.5)*canvas.width,y=canvas.top-parent.top+(-point.y*.5+.5)*canvas.height;
    element.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;
@@ -69,12 +89,12 @@ function Rocket({thrust,reduced}:{thrust:React.RefObject<number>;reduced:boolean
  useFrame(({clock})=>{if(flame.current){flame.current.scale.y=.3+thrust.current*(1+(reduced?0:Math.sin(clock.elapsedTime*32)*.13));flame.current.visible=thrust.current>.05;}});
  return <group rotation={[-Math.PI/2,0,0]} scale={.7}>
   <mesh><capsuleGeometry args={[.42,1.1,8,24]}/><meshStandardMaterial color="#eee7d8" roughness={.4}/></mesh>
-  <mesh position={[0,1,0]}><coneGeometry args={[.42,.65,24]}/><meshStandardMaterial color="#db7c61" roughness={.6}/></mesh>
-  <mesh position={[0,.3,.4]} rotation={[Math.PI/2,0,0]}><cylinderGeometry args={[.23,.23,.08,32]}/><meshStandardMaterial color="#24434b" metalness={.6} roughness={.2}/></mesh>
-  <mesh position={[0,.3,.45]}><torusGeometry args={[.23,.045,8,32]}/><meshStandardMaterial color="#e7b38a" metalness={.6}/></mesh>
-  {[-1,1].map(side=><mesh key={side} position={[side*.47,-.55,0]} rotation={[0,0,side*-.3]}><boxGeometry args={[.2,.75,.55]}/><meshStandardMaterial color="#cf745e"/></mesh>)}
+  <mesh position={[0,1,0]}><coneGeometry args={[.42,.65,24]}/><meshStandardMaterial color="#8b78ff" roughness={.5}/></mesh>
+  <mesh position={[0,.3,.4]} rotation={[Math.PI/2,0,0]}><cylinderGeometry args={[.23,.23,.08,32]}/><meshStandardMaterial color="#1f2560" metalness={.6} roughness={.2}/></mesh>
+  <mesh position={[0,.3,.45]}><torusGeometry args={[.23,.045,8,32]}/><meshStandardMaterial color="#c3b8ff" metalness={.6}/></mesh>
+  {[-1,1].map(side=><mesh key={side} position={[side*.47,-.55,0]} rotation={[0,0,side*-.3]}><boxGeometry args={[.2,.75,.55]}/><meshStandardMaterial color="#5b6cf0"/></mesh>)}
   <mesh position={[0,-.92,0]}><cylinderGeometry args={[.3,.36,.24,20]}/><meshStandardMaterial color="#576771" metalness={.7}/></mesh>
-  <mesh ref={flame} position={[0,-1.35,0]} rotation={[0,0,Math.PI]}><coneGeometry args={[.23,.9,16]}/><meshBasicMaterial color="#ffb478" transparent opacity={.85}/></mesh>
+  <mesh ref={flame} position={[0,-1.35,0]} rotation={[0,0,Math.PI]}><coneGeometry args={[.23,.9,16]}/><meshBasicMaterial color="#9fc4ff" transparent opacity={.85}/></mesh>
  </group>;
 }
 function Scene(props:Props) {
@@ -87,7 +107,7 @@ function Scene(props:Props) {
   model.traverse(object=>{const mesh=object as THREE.Mesh;if(mesh.isMesh)mesh.raycast=()=>{};});
   return model;
  },[gltf]);
- const {gl,scene,camera}=useThree();
+ const {gl,scene,camera,size}=useThree();
  const callbacks=useRef({onLoad:props.onLoad,onFailure:props.onFailure});
  callbacks.current={onLoad:props.onLoad,onFailure:props.onFailure};
  const compiled=useRef(false),readySent=useRef(false);
@@ -103,7 +123,12 @@ function Scene(props:Props) {
  const compactViewport=useRef(window.matchMedia('(max-width: 760px)'));
  const cameraTarget=useMemo(()=>new THREE.Vector3(OVERVIEW.x,0,OVERVIEW.z),[]);
  const desiredCamera=useMemo(()=>new THREE.Vector3(),[]),desiredTarget=useMemo(()=>new THREE.Vector3(),[]);
- useFrame((_,delta)=>{
+ const previousLanded=useRef<DestinationId|null>(null);
+ const compact=compactViewport.current.matches;
+ // On the ground, distant scenery fades into the planet's air, which sells the scale; up in space there is no haze.
+ useEffect(()=>{scene.fog=props.landed?new THREE.Fog(new THREE.Color(LOOKS[props.landed].air).multiplyScalar(.34),12,62):null;return()=>{scene.fog=null;};},[scene,props.landed]);
+ const layout=useMemo(()=>props.landed?surfaceLayout(SECTIONS[props.landed].entries.length,size.width,size.height,compact):null,[props.landed,size.width,size.height,compact]);
+ useFrame(({clock},delta)=>{
   const dt=Math.min(delta,.05);const {controls,flight,mode}=props;
   if(compiled.current&&!readySent.current){readySent.current=true;requestAnimationFrame(()=>callbacks.current.onLoad('ready'));}
   if(lastReset.current!==props.reset){flight.current=newFlight();lastReset.current=props.reset;}
@@ -121,13 +146,23 @@ function Scene(props:Props) {
   thrust.current=mode==='docking'?.7:mode==='flying'&&!!(x||z)?(boost?1.6:1):0;
   const f=flight.current;
   if(rocket.current){rocket.current.position.set(f.x,.3,f.z);const diff=Math.atan2(Math.sin(f.angle-rocket.current.rotation.y),Math.cos(f.angle-rocket.current.rotation.y));rocket.current.rotation.y+=diff*(1-Math.exp(-9*dt));}
-  if(mode!=='paused'){
-   const view=mode==='arriving'||mode==='reading'?'planet':mode==='welcome'?'overview':'flight';
+  const perspective=camera as THREE.PerspectiveCamera;
+  // Entering or leaving a planet happens under the warp flash: jump the camera straight to the new scene.
+  if(previousLanded.current!==props.landed){
+   const pose=props.landed?surfaceCamera(clock.elapsedTime,compactViewport.current.matches,props.reduced):cameraPose('planet',f,compactViewport.current.matches,props.zoom,false,target);
+   camera.position.set(pose.position.x,pose.position.y,pose.position.z);cameraTarget.set(pose.target.x,pose.target.y,pose.target.z);camera.lookAt(cameraTarget);
+   perspective.fov=pose.fov;perspective.updateProjectionMatrix();previousLanded.current=props.landed;
+  }
+  if(props.landed){
+   const pose=surfaceCamera(clock.elapsedTime,compactViewport.current.matches,props.reduced),blend=1-Math.exp(-2*dt);
+   camera.position.lerp(pose.position,blend);cameraTarget.lerp(pose.target,blend);camera.lookAt(cameraTarget);
+   perspective.fov=THREE.MathUtils.lerp(perspective.fov,pose.fov,blend);perspective.updateProjectionMatrix();
+  } else if(mode!=='paused'){
+   const view=mode==='arriving'?'planet':mode==='welcome'?'overview':'flight';
    const pose=cameraPose(view,f,compactViewport.current.matches,props.zoom,boost&&!props.reduced,target);
    desiredCamera.set(pose.position.x,pose.position.y,pose.position.z);desiredTarget.set(pose.target.x,pose.target.y,pose.target.z);
    const blend=props.reduced?1:1-Math.exp(-3*dt);
    camera.position.lerp(desiredCamera,blend);cameraTarget.lerp(desiredTarget,blend);camera.lookAt(cameraTarget);
-   const perspective=camera as THREE.PerspectiveCamera;
    perspective.fov=THREE.MathUtils.lerp(perspective.fov,pose.fov,blend);perspective.updateProjectionMatrix();
    const settled=camera.position.distanceTo(desiredCamera)<.15&&cameraTarget.distanceTo(desiredTarget)<.15;
    if(settled&&mode==='arriving')props.onDock();
@@ -138,10 +173,16 @@ function Scene(props:Props) {
  },-1); // camera first, so everything else this frame sees the updated view
  return <>
   <color attach="background" args={['#03050a']}/>
-  <ambientLight intensity={1.2}/><directionalLight position={[-12,15,18]} intensity={2} color="#fff1e0"/><directionalLight position={[15,5,-12]} intensity={.8} color="#b7d6df"/>
-  <pointLight position={[HOME.x,.5,HOME.z]} intensity={30} decay={1.6} color="#ffe2c2"/>
-  <Sky reduced={props.reduced}/><Orbit radius={9} opacity={.16}/><Orbit radius={16} opacity={.12}/><Orbit radius={23} opacity={.08}/>
-  <DockBeacon target={destination(props.destination)} active={props.mode==='docking'||props.mode==='arriving'||props.mode==='reading'} reduced={props.reduced}/><Head character={character} flight={props.flight} reduced={props.reduced} facing={props.mode==='paused'||(props.destination==='home'&&['docking','arriving','reading'].includes(props.mode))} onClick={()=>props.onTravel('home')}/><Interests reduced={props.reduced}/>
+  {/* Light like real space: one strong key light from a distant star gives every planet a lit and a shadowed side;
+      a cool rim from behind and a low violet fill keep the dark sides readable. */}
+  <ambientLight intensity={.32}/><hemisphereLight args={['#b9c4ff','#1a1035',.55]}/>
+  <directionalLight position={[-16,14,12]} intensity={3.1} color="#fff6ec"/><directionalLight position={[14,6,-16]} intensity={1.1} color="#7d8cff"/>
+  <directionalLight position={[2,4,20]} intensity={.55} color="#c8ccff"/>
+  <Sky reduced={props.reduced}/>
+  <group visible={!props.landed}>
+  <Orbit radius={9} opacity={.14}/><Orbit radius={18} opacity={.1}/><Orbit radius={25} opacity={.07}/>
+  <SpaceDust/>
+  <DockBeacon target={destination(props.destination)} active={props.mode==='docking'||props.mode==='arriving'} reduced={props.reduced}/><Head character={character} flight={props.flight} reduced={props.reduced} facing={props.mode==='paused'||(props.destination==='home'&&['docking','arriving'].includes(props.mode))} onClick={()=>props.onTravel('home')}/><Interests reduced={props.reduced}/>
   <Planets reduced={props.reduced} onSelect={props.onTravel}/><LabelProjector labels={props.labels}/>
   <group position={[...SATELLITE.position]} rotation={[.1,.2,-.35]}>
    <mesh><boxGeometry args={[.6,.6,.65]}/><meshStandardMaterial color="#dec9a4" metalness={.45}/></mesh>
@@ -149,6 +190,9 @@ function Scene(props:Props) {
    <mesh position={[0,.5,0]}><cylinderGeometry args={[.025,.025,.7,8]}/><meshStandardMaterial color="#d6c3a1"/></mesh>
   </group>
   <group ref={rocket}><Rocket thrust={thrust} reduced={props.reduced}/></group><EngineTrail flight={props.flight} thrust={thrust} enabled={props.mode==='flying'||props.mode==='docking'} reduced={props.reduced} reset={props.reset}/>
+  </group>
+  {props.landed&&layout&&<Surface id={props.landed} layout={layout} character={character} reduced={props.reduced}/>}
+  {layout&&<CardProjector cards={props.cards} anchors={layout.anchors}/>}
  </>;
 }
 /** Frame statistics overlay, shown with ?perf in the URL. */

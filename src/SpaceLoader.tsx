@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Mark } from './Logo';
 
 export type LoadStage = 'systems' | 'model' | 'renderer' | 'ready';
 type Props = { stage: LoadStage; progress: number | null; failed: boolean; slow: boolean; onDone: () => void; onRead: () => void };
@@ -51,7 +52,7 @@ export default function SpaceLoader({ stage, progress, failed, slow, onDone, onR
       if (bar.current) bar.current.style.transform = `scaleX(${shownProgress.toFixed(3)})`;
       // Background: deep space with a faint warm glow ahead.
       const glow = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) * .7);
-      glow.addColorStop(0, `rgba(36,26,30,${.55 + warp * .3})`); glow.addColorStop(.45, 'rgba(10,12,22,1)'); glow.addColorStop(1, 'rgba(3,5,10,1)');
+      glow.addColorStop(0, `rgba(44,32,96,${.5 + warp * .35})`); glow.addColorStop(.45, 'rgba(9,10,30,1)'); glow.addColorStop(1, 'rgba(4,5,16,1)');
       context.fillStyle = glow; context.fillRect(0, 0, width, height);
       const focal = Math.min(width, height) * .55;
       for (const star of stars) {
@@ -62,7 +63,7 @@ export default function SpaceLoader({ stage, progress, failed, slow, onDone, onR
         const px = width / 2 + star.x / previousZ * focal, py = height / 2 + star.y / previousZ * focal;
         if (sx < -50 || sx > width + 50 || sy < -50 || sy > height + 50) { star.z = 1; continue; }
         const light = Math.min(1, (1 - star.z) * 1.4), size = (1 - star.z) * 2.1 + .3;
-        const color = star.tint < .2 ? '255,214,180' : star.tint < .45 ? '200,215,255' : '245,246,255';
+        const color = star.tint < .2 ? '196,184,255' : star.tint < .45 ? '190,208,255' : '242,244,255';
         context.strokeStyle = `rgba(${color},${light})`; context.lineWidth = size; context.lineCap = 'round';
         context.beginPath(); context.moveTo(px, py); context.lineTo(sx + (sx - px) * warp * 6, sy + (sy - py) * warp * 6); context.stroke();
       }
@@ -76,7 +77,7 @@ export default function SpaceLoader({ stage, progress, failed, slow, onDone, onR
   return <section className={`space-loader ${leaving ? 'is-leaving' : ''}`} aria-label="Loading">
     <canvas ref={canvas} className="space-loader-stars" aria-hidden="true"/>
     <div className="space-loader-center">
-      <div className="space-loader-mark">omar<span>.</span></div>
+      <div className="space-loader-mark"><Mark/>OMAR</div>
       {!failed && <div className="space-loader-track" aria-hidden="true"><div ref={bar} className="space-loader-bar"/></div>}
       {failed && <div className="space-loader-failed"><p>The 3D universe couldn’t load on this device.</p><div><button className="primary" onClick={onRead}>Read about Omar ↗</button><button className="text-button" onClick={() => window.location.reload()}>Try again</button></div></div>}
       {slow && !failed && stage !== 'ready' && <button className="space-loader-slow" onClick={onRead}>Taking a while? Read about Omar instead</button>}

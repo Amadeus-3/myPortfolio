@@ -83,4 +83,5 @@ test('E always has somewhere to go: the nearest destination, from anywhere', () 
  assert.equal(nearestDestination(SPAWN), 'home');
  for (const d of DESTINATIONS) assert.equal(nearestDestination(dockPoint(d)), d.id, `${d.id} is nearest at its own dock`);
  assert.equal(nearestDestination({ x: 29, z: -25 }), 'projects');
+ assert.equal(nearestDestination({ x: -29, z: 25 }), 'education');
 });

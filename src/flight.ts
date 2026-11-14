@@ -27,11 +27,11 @@ const planet = (id: DestinationId, x: number, z: number, radius: number, ring?: 
 };
 export const DESTINATIONS: Destination[] = [
   { id: 'home', ...HOME, radius: HOME_OUTER_RADIUS, dockRadius: DOCK_RADIUS, approachRadius: DOCK_APPROACH_RADIUS },
-  planet('experience', -14, -8, 2.1),
-  planet('projects', 14, -8, 1.7, 3.1),
-  planet('education', -13, 9.5, 1.8),
-  planet('skills', 13.5, 9.5, 1.9),
-  planet('contact', 0, -19, 1.5),
+  planet('experience', -16, -9, 3.1),
+  planet('projects', 16, -9, 2.5, 4.4),
+  planet('education', -14, 8.5, 2.8),
+  planet('skills', 14, 8.5, 2.9),
+  planet('contact', 0, -21, 2.4),
 ];
 export const destination = (id: DestinationId) => DESTINATIONS.find(d => d.id === id)!;
 export const dockPoint = (d: Destination) => ({ x: d.x, z: d.z + d.dockRadius });
@@ -55,7 +55,7 @@ export function nearestDestination(f: { x: number; z: number }): DestinationId {
   return best.id;
 }
 
-export const SATELLITE = { position: [-23, 1, 1] as const, radius: 1.65 };
+export const SATELLITE = { position: [-26, 1, 3] as const, radius: 1.65 };
 export const OBSTACLES = [
   ...DESTINATIONS.map(d => ({ x: d.x, z: d.z, radius: d.ring ?? d.radius })),
   { x: SATELLITE.position[0], z: SATELLITE.position[2], radius: SATELLITE.radius },
